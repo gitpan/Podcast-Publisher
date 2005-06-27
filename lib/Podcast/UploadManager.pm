@@ -3,7 +3,7 @@ package Podcast::UploadManager;
 
 use Net::FTP;
 
-$VERSION="0.31";
+$VERSION="0.32";
 
 sub new { 
     my $class = shift;

@@ -14,7 +14,7 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.31";
+$VERSION="0.32";
 
 =pod
 
@@ -34,11 +34,10 @@ Podcast:Manager - Module for creating and managing podcasts
  my $xml = "./podcast.xml";
  $podcast->set_file( $xml );
  $podcast->set_remote_root( "http://localhost.localdomain/podcast/publishing/" );
- $podcast->set_db_connection( { 'driver' => "mysql", 
-				'username' => 'foo',
-				'password' => 'bar',
-				'host' => 'localhost',
-				'database' => 'podcast' } );
+ # use the mysql DB on localhost, with database podcasts, and podcast/podpass credentials
+ $podcast->set_db_connection( { 'dsn' =>  "DBI:mysql:podcasts;host=localhost",
+				'username' => 'podcast',
+				'password' => 'podpass' } );
 
  # If we change podcast information, synchronize this information in the MP3 file itself
  $podcast->set_synchronize( 1 );
