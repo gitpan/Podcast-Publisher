@@ -6,7 +6,6 @@ use XML::Simple;
 use IO::File;
 use Date::Format;
 use XML::Writer;
-use MP3::Info;
 use DBI;
 use Podcast::UploadManager;
 use Podcast::LoggerInterface;
@@ -15,7 +14,7 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.30";
+$VERSION="0.31";
 
 =pod
 
@@ -90,7 +89,7 @@ This library requires a database (currently supports MySQL, probably postgres as
 
 =over 4
 
-=item BUGS
+=head1 BUGS
 
 Some metadata is not stored properly in the MP3 file if you use synchronization, but this will
 be fixed very soon.
@@ -217,16 +216,16 @@ sub verify_episode_table {
     my $dbh = shift;
 
     eval{
-	$dbh->do( "select title from podcast_episodes limit 1" ) 
+	$dbh->do( "select title from episodes limit 1" ) 
 	    or die 1;
 	};
 
     if( $@ ) {
 	eval { 
-	    $self->log_message( "Creating table in database" );
+	    $self->log_message( "Creating table in database ($@)" );
 	    # Create it.
 	    my $sql = <<"END";
-		CREATE TABLE `podcast_episodes` 
+		CREATE TABLE `episodes` 
 		( `id` int(11) NOT NULL auto_increment,
 		  `title` varchar(255) NOT NULL default '',
 		  `link` varchar(255) default NULL,
@@ -264,10 +263,8 @@ sub get_dbh
 	    $username = $self->{ 'db_username' };
 	    $password = $self->{ 'db_password' };
 	    $dbh = DBI->connect( $dsn, $username, $password );
-	    $self->log_message( "Create episode table with $dsn, $username and xxxxxxx" );
 	    # Make the table, if not there
 	    $self->verify_episode_table( $dbh );
-	    $self->log_message( "Added episodes table" );
 	};
 	if( $@ ) {
 	    $self->log_error( "Unable to establish DB connection: $@" );
@@ -319,7 +316,7 @@ sub get_episodes {
     $self->log_error( "No DB connection string specified" ) unless $self->{ 'dbh' };
     my $limit = $self->{ 'maximum_episodes' } || 15;
     my $sql = "select * " .
-	" from podcast_episodes " .
+	" from episodes " .
 	( $show_hidden ? "" : " where enabled = 'yes' " ) .
 	" order by id desc limit $limit";
     my $rh = $self->retrieve_items_by_statement( $sql );
@@ -343,7 +340,7 @@ sub delete_episode {
 
     if( $id ) {
 	$self->log_message( "Deleted episode with id $id" );
-	my $sql = "delete from podcast_episodes where id = ?";
+	my $sql = "delete from episodes where id = ?";
 	my $sth = $self->get_dbh()->prepare( $sql );
 	$sth->execute( $id );
 	$self->write();
@@ -397,11 +394,19 @@ sub change_episode_display {
     my $id = shift;
     my $display = shift;
     $self->log_error( "Must specify id for hiding" ) unless $id;
-    my $sql = "update podcast_episodes set enabled = ? where id = ?";
+    my $sql = "update episodes set enabled = ? where id = ?";
     my $sth = $self->get_dbh()->prepare( $sql );
     $sth->execute( $display, $id );
     $self->write();
 }
+
+=item get_metadata()
+
+    $podcast->get_metadata();
+
+Returns metadata about the podcast feed as a hashref
+
+=cut
 
 sub get_metadata { 
     my $self = shift;
@@ -494,19 +499,24 @@ sub write {
     my $editor = $attr->{ 'editor' };
     my $webmaster = $attr->{ 'webmaster' };
     my $generator = $attr->{ 'generator' } || 'Webcast in a Box, Inc.';
+    my $guid_reference = $attr->{ 'guid_base' };
+    my $link = $attr->{ 'link' };
 
     $self->log_message( "Metadata: $title, $description, $timezone, $language, $date, $build_date, $doc, $editor, $webmaster, $generator" );
 
+    my $last_build_date = time2str( "%a, %d %h %Y %X $timezone",  time );
     my %mapping = (
 		   'title' => $title,
 		   'description' => $description,
 		   'language' => $language,
 		   'pubDate' => $date,
+		   'link' => $link,
 		   'lastBuildDate' => $build_date,
 		   'docs' => $docs,
-		   'editor' => $editor,
-		   'webmaster' => $webmaster,
+		   'managingEditor' => $editor,
+		   'webMaster' => $webmaster,
 		   'generator' => $generator,
+		   'lastBuildDate' => $last_build_date,
 	       );
 
     my $output = new IO::File( ">" . $filename );
@@ -517,47 +527,50 @@ sub write {
 				  DATA_MODE => 1,
 				  );
     $writer->startTag( "rss",
-		       "xmlns:blogChannel" => $blog,
+		       # "xmlns:blogChannel" => $blog,
 		       "version" => "2.0" );
     $writer->startTag( "channel" );
-    foreach my $key ( 'title', 'description', 'language',
-		      'pubDate', 'docs',
-		      'editor', 'webmaster', 'generator' ) {
+    foreach my $key ( 'title', 'link', 'description', 'language',
+		      'pubDate', 'lastBuildDate', 'docs',
+		      'generator', 'managingEditor', 'webMaster' ) {
 	$writer->dataElement( $key, $mapping{ $key } );
     }
-    $writer->dataElement( 'lastBuildDate' => 
-			  time2str( "%a, %d %h %Y %X $timezone",  time ) );
     
     if( $items ) {
 	foreach my $item ( @{$items} ) {
 
-	    $writer->startTag( "item" );
-	    foreach my $key ( 'title', 'description', 'author', 
-			      'category' ) {
-		$writer->dataElement( $key => $item->{ $key } );
-		$self->log_message( "Item data: ". $key . " => " .  $item->{ $key } );
-	    }
-	    $writer->dataElement( "pubDate", 
-				  time2str( "%a, %d %h %Y %X $timezone",  $item->{ 'pubDate' } ) );
-
-	    my $file_url = $self->compose_url( $item->{ 'mp3' } );
-
-	    $writer->dataElement( "link", $file_url );
-
-	    # Add the guid item
-	    $writer->startTag( "guid", "isPermaLink" => "false" );
-	    $writer->characters( $item->{ 'link' } || $file_url );
-	    $writer->endTag( "guid" );
-	    
+	    # Generate the items first; if there are errors, 
+	    # abort this item
 	    # Add the enclosure
 	    my $length = $self->get_length( $item->{ 'mp3' } );
-	    $self->log_message( "Enclosure data: $file_url with length: $length" );
-	    $writer->startTag( "enclosure", 
-			       'length' => $length,
-			       'url' => $file_url,
-			       'type' => 'audio/mpeg' );
-	    $writer->endTag( "enclosure" );
-	    $writer->endTag( "item" );
+	    my $file_url = $self->compose_url( $item->{ 'mp3' } );
+	    my $guid = $guid_reference . $file_url;
+
+	    $item->{ 'link' } = $guid;
+	    $item->{ 'pubDate' } = time2str( "%a, %d %h %Y %X $timezone",  
+					     $item->{ 'pubDate' } );
+
+	    if( $length and $file_url ) {
+		$writer->startTag( "item" );
+		foreach my $key ( 'title', 'link', 'category', 'author',
+				  'description', 'pubDate' ) {
+		    $writer->dataElement( $key => $item->{ $key } );
+		    $self->log_message( "Item data: ". $key . " => " .  $item->{ $key } );
+		}
+		
+		# Add the guid item
+		$writer->startTag( "guid" ); # , "isPermaLink" => "false" );
+		$writer->characters( $guid );
+		$writer->endTag( "guid" );
+		
+		$self->log_message( "Enclosure data: $file_url with length: $length" );
+		$writer->startTag( "enclosure", 
+				   'length' => $length,
+				   'url' => $file_url,
+				   'type' => 'audio/mpeg' );
+		$writer->endTag( "enclosure" );
+		$writer->endTag( "item" );
+	    }
 	}
     }
     
@@ -662,7 +675,7 @@ sub get_file {
     my $self = shift;
     $self->log_message( "Entering get_file" );
     my $id = shift;
-    my $sql = "select * from podcast_episodes where id = ?";
+    my $sql = "select * from episodes where id = ?";
     my $sth = $self->get_dbh()->prepare( $sql );
     $sth->execute( $id );
     my $file;
@@ -709,13 +722,15 @@ sub write_episode_metadata {
     my $date = $item->{ 'pubDate' };
     $date = $item->{ 'date' } unless $date;
     $date = time() unless $date;
+    # Get the year from the time
+    my $year = time2str( "%Y", $date );
+
     my $title = $item->{ 'title' };
     my $creator = $item->{ 'author' } || $item->{ 'artist' };
     my $album = $item->{ 'album' };
     my $description = $item->{ 'description' };
-    my $genre= $item->{ 'genre' };
+    my $category = $item->{ 'category' } || $item->{ 'genre' };
     my $link = $item->{ 'link' };
-    my $category = $item->{ 'category' };
     chomp $date;
     my $sql;
     my @values;
@@ -737,7 +752,7 @@ sub write_episode_metadata {
 			   'pubDate',
 			   'description',
 			   'mp3' );
-	$sql = "update podcast_episodes set ";
+	$sql = "update episodes set ";
 	my @code;
 	foreach my $potential ( @potentials ) {
 	    if( $item->{ $potential } ) {
@@ -751,7 +766,7 @@ sub write_episode_metadata {
 	push @values, $id;
     }
     else {
-	$sql = "insert into podcast_episodes " .
+	$sql = "insert into episodes " .
 	    "       ( title, link, author, category, pubDate, description, mp3 ) " .
 	    " values( ?,     ?,    ?,      ?,        ?,       ?,           ? )";
 	@values = ( $title,
@@ -770,10 +785,13 @@ sub write_episode_metadata {
 	
     # Update the mp3 as well
     if( $self->{ 'synchronize' } ) {
+	use MP3::Info;
+
 	my @mp3_data = ( $full_file, 
 			 $title, $creator, $album, 
-			 $date, $description, $genre );
+			 $year, $description, $category );
 	if( !set_mp3tag ( @mp3_data ) ) {
+
 	    $self->log_error( "Cannot write using MP3::Info, trying with mp3info" );
 	    # Try with mp3info
 	    # mp3info [-i] [-t title] [-a artist] [-l album] [-y year] 
@@ -783,7 +801,7 @@ sub write_episode_metadata {
 			     "-a", $author,
 			     "-l", $album,
 			     "-c", $description,
-			     "-g", $genre,
+			     "-g", $category,
 			     $full_file ) ) {
 		$self->log_error( "Cannot set mp3 information for $full_file" );
 	    }
@@ -810,8 +828,12 @@ sub compose_url {
     my $file = shift;
     
     # Strip off the front of the filename
-    my $short = $1 if $file =~ /\/([^\/]+)$/;
-    
+    my $short = $1 
+	if $file =~ /\/?([^\/]+)$/;
+    $short = $file unless $short;
+    my $msg= "Using short name: $short ($file)";
+    # print $msg;
+    $self->log_message( $msg );
     return $self->{ 'remote_root' } . $short;
 }
 
@@ -888,7 +910,7 @@ sub set_maximum_episodes {
 =cut 
 sub set_synchronize {
     my $self = shift;
-    $self-{ 'synchronize' } = shift;
+    $self->{ 'synchronize' } = shift;
 }
 
 
