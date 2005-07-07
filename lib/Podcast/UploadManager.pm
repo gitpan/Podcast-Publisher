@@ -3,7 +3,7 @@ package Podcast::UploadManager;
 
 use Net::FTP;
 
-$VERSION="0.32";
+$VERSION="0.30";
 
 sub new { 
     my $class = shift;
@@ -30,6 +30,57 @@ sub DESTROY {
     $self->{ 'ftp_handle' } = 0;
 }
 
+sub clean {
+    my $self = shift;
+    my $items = shift;
+
+    if( $self->{ 'clean' } ) {
+	my $ftp = $self->{ 'ftp_handle' };
+	# Go over each MP3 file, and delete if we are past expiration
+	# and the file is not in our list
+	my @remote_files = grep /\.mp3$/, $ftp->ls();
+
+	# Iterate over each one, pull out the ones we have in the podcast
+	foreach my $to_delete ( @remote_files ) {
+
+	    # Make sure we don't have this in the current podcast
+	    my $dont_delete = 0;
+	    foreach my $current ( @{$items} ) {
+		$dont_delete = 1 if $to_delete =~ /$current->{'mp3'}/;
+	    }
+	    
+	    if( not $dont_delete ) {
+		my $do_delete = 0;
+		# If we want to delete it, make sure expiration date is OK
+		my $now = time;
+		my $expiration = $self->{ 'clean_expiration' };
+		if( $expiration ) {
+		    if( $expiration < ( $now - $ftp->mdtm( $to_delete ) ) ) {
+			$self->log_message( "Elapsed time: " . ( $now - $ftp->mdtm( $to_delete ) ) .
+					    " vs. $expiration" );
+			$do_delete = 1;
+		    }
+		}
+		else {
+		    $do_delete = 1;
+		}
+
+		if( $do_delete ) {
+		    $self->log_message( "Deleting from remote site: $to_delete and MD5 hash" ); 
+		    $ftp->delete( $to_delete ); 
+		    $ftp->delete( $to_delete . ".md5" ); 
+		}
+	    }
+	}
+    }
+}
+
+sub set_cleanup {
+    my $self = shift;
+    my $hash = shift;
+    $self->{ 'clean' } = $hash->{ 'clean' };
+    $self->{ 'clean_expiration' } = $hash->{ 'expires' };
+}
 
 sub upload {
     my $self = shift;
@@ -45,8 +96,16 @@ sub upload {
 	my $ftp = $self->{ 'ftp_handle' };
 
 	if( $ftp ) {
+	    # Disable these for now, since we often get without true error
+	    # $self->log_message( "Unable to login with username: " . $self->{ 'username' } .
+	    #", message: " . $ftp->message ) 
+	    # unless 
 	    $ftp->login( $self->{ 'username' }, $self->{ 'password' } );
+	    # $self->log_message( "Unable to move to " . $self->{ 'path' } . 
+	    # ", message: " . $ftp->message ) 
+	    #unless 
 	    $ftp->cwd( $self->{ 'path' } );
+
 	    $ftp->binary();
 
 	    my $size = -s $file;
@@ -79,8 +138,9 @@ sub upload_if_necessary {
     my $skip_upload = 0;
     # Get the message hash, to be sure.
     my $remote_digest_filename = "/tmp/" . $short_name . ".md5";
-    $ftp->get( $short_name . ".md5", $remote_digest_filename );
-
+    $self->log_message( "Unable to find MD5 file for $remote_digest_filename" ) unless 
+	$ftp->get( $short_name . ".md5", $remote_digest_filename );
+    
     # OK, got remote digest, now check local one
     $ctx = Digest::MD5->new;
     if( open FILE, $file ) {
@@ -104,7 +164,7 @@ sub upload_if_necessary {
     if( $fh->open( "> $remote_digest_filename" ) ) {
 	print $fh $local_digest;
 	$fh->close();
-	# $self->log_message( "Wrote new digest: $local_digest" );
+	$self->log_message( "Wrote new digest: $local_digest" );
     }	
     
     if( $local_digest eq $remote_digest ) {

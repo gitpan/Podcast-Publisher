@@ -14,19 +14,19 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.32";
+$VERSION="0.33";
 
 =pod
 
 =head1 NAME
 
-Podcast:Manager - Module for creating and managing podcasts
+Podcast::Publisher - Module for creating and managing podcasts
 
 =head1 SYNOPSIS
 
 =over
 
- use Podcast:Publisher;
+ use Podcast::Publisher;
 
  my $podcast = Podcast::Publisher->new;
  $podcast->set_logger( sub { my $msg = shift; print $msg; } );
@@ -34,10 +34,11 @@ Podcast:Manager - Module for creating and managing podcasts
  my $xml = "./podcast.xml";
  $podcast->set_file( $xml );
  $podcast->set_remote_root( "http://localhost.localdomain/podcast/publishing/" );
- # use the mysql DB on localhost, with database podcasts, and podcast/podpass credentials
- $podcast->set_db_connection( { 'dsn' =>  "DBI:mysql:podcasts;host=localhost",
-				'username' => 'podcast',
-				'password' => 'podpass' } );
+ $podcast->set_db_connection( { 'driver' => "mysql", 
+				'username' => 'foo',
+				'password' => 'bar',
+				'host' => 'localhost',
+				'database' => 'podcast' } );
 
  # If we change podcast information, synchronize this information in the MP3 file itself
  $podcast->set_synchronize( 1 );
@@ -147,6 +148,65 @@ sub upload {
     
     # Uplaod the RSS file
     $self->{ 'upload_handle' }->upload( $self->{ 'filename' } );
+
+    $self->{ 'upload_handle' }->clean( $items );
+}
+
+=item enable_cleanup( ... )
+
+$podcast->enable_cleanup( { ... } );
+
+This method allow you to tell the publisher to delete files on the remote server
+which are no longer in the podcast.  If called with no parameters, it deletes all 
+files on the remote server which are not in the podcast RSS file.  If someone who 
+recently grabbed your podcast RSS is downloading an MP3 from a podcast file which 
+you just updated, this could cause strange errors.  To remedy this you can provide 
+a hashref with the 'expires' parameter to indicate how many seconds out of date a 
+file can be before deletion.  So, if you call enable_cleanup() like this:
+
+    $podcast->enable_cleanup( { 'expires' => 7 * 24 * 60 * 60 } );
+
+you'll delete files which are not stored in the podcast RSS, and are older than a week.  While
+this doesn't guarantee that you didn't just modify a podcast RSS, it gives you a little more
+leeway.  This is generally a convenience method which prevents your FTP server from getting
+filled with lots of files; if you feel confident doing the cleanup by hand, the results 
+will probably be better.
+
+Caveat:  Don't call this function if you store anything else in the FTP directory
+where the podcast and associated MP3 files are stored.  The module tries to be careful
+about deleting what it knows about, but this is an asynchronous process.
+
+=cut
+
+sub enable_cleanup {
+    my $self = shift;
+    my $hash = shift;
+    print "In enable cleanup.\n";
+    if( $self->{ 'upload_handle' } ) {
+	print "Setting cleanup to true\n";
+	$self->{ 'upload_handle' }->set_cleanup( { 'clean' => 1,
+						      ( $hash ? 
+							( 'expires' => $hash->{ 'expires' } ) : 
+							() ) } );
+    }
+}
+
+=item disable_cleanup()
+
+$podcast->disable_cleanup();
+
+Disables cleanup of files.  See enable_cleanup().
+
+=cut
+
+sub disable_cleanup {
+    my $self = shift;
+    if( $self->{ 'upload_handle' } ) {
+	$self->{ 'upload_handle' }->set_cleanup( { 'clean' => 0 } );
+    }
+    else {
+	$self->error_message( "Cannot call enable cleanup until you have set_upload_settings()" );
+    }
 }
 
 =item set_upload_settings()
