@@ -14,7 +14,7 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.33";
+$VERSION="0.34";
 
 =pod
 
