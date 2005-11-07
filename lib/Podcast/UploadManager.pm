@@ -3,7 +3,7 @@ package Podcast::UploadManager;
 
 use Net::FTP;
 
-$VERSION="0.34";
+$VERSION="0.37";
 
 sub new { 
     my $class = shift;
@@ -164,14 +164,14 @@ sub upload_if_necessary {
     if( $fh->open( "> $remote_digest_filename" ) ) {
 	print $fh $local_digest;
 	$fh->close();
-	$self->log_message( "Wrote new digest: $local_digest" );
+	# $self->log_message( "Wrote new digest: $local_digest" );
     }	
     
     if( $local_digest eq $remote_digest ) {
 	$skip_upload = 1;
     }
     else {
-	$self->log_message( "MD5 hashes ($local_digest vs $remote_digest)" );
+	$self->log_message( "MD5 hash mismatch ($local_digest vs $remote_digest)" );
     }
 
     if( not $skip_upload ) {

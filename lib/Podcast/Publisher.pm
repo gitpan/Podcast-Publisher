@@ -14,7 +14,7 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.34";
+$VERSION="0.37";
 
 =pod
 
@@ -692,8 +692,9 @@ sub add_new_episode {
     my $self = shift;
     $self->log_message( "Entering add_new_episode" );
     my $item = shift;
+    my $no_update = shift;
     $self->write_episode_metadata( $item );
-    $self->write();
+    $self->write() unless $no_update;
 }
 
 =item get_titles()
