@@ -3,7 +3,7 @@ package Podcast::UploadManager;
 
 use Net::FTP;
 
-$VERSION="0.37";
+$VERSION="0.40";
 
 sub new { 
     my $class = shift;
@@ -36,39 +36,41 @@ sub clean {
 
     if( $self->{ 'clean' } ) {
 	my $ftp = $self->{ 'ftp_handle' };
-	# Go over each MP3 file, and delete if we are past expiration
-	# and the file is not in our list
-	my @remote_files = grep /\.mp3$/, $ftp->ls();
-
-	# Iterate over each one, pull out the ones we have in the podcast
-	foreach my $to_delete ( @remote_files ) {
-
-	    # Make sure we don't have this in the current podcast
-	    my $dont_delete = 0;
-	    foreach my $current ( @{$items} ) {
-		$dont_delete = 1 if $to_delete =~ /$current->{'mp3'}/;
-	    }
+	if( $ftp ) {
+	    # Go over each MP3 file, and delete if we are past expiration
+	    # and the file is not in our list
+	    my @remote_files = grep /\.mp3$/, $ftp->ls();
 	    
-	    if( not $dont_delete ) {
-		my $do_delete = 0;
-		# If we want to delete it, make sure expiration date is OK
-		my $now = time;
-		my $expiration = $self->{ 'clean_expiration' };
-		if( $expiration ) {
-		    if( $expiration < ( $now - $ftp->mdtm( $to_delete ) ) ) {
-			$self->log_message( "Elapsed time: " . ( $now - $ftp->mdtm( $to_delete ) ) .
-					    " vs. $expiration" );
+	    # Iterate over each one, pull out the ones we have in the podcast
+	    foreach my $to_delete ( @remote_files ) {
+		
+		# Make sure we don't have this in the current podcast
+		my $dont_delete = 0;
+		foreach my $current ( @{$items} ) {
+		    $dont_delete = 1 if $to_delete =~ /$current->{'mp3'}/;
+		}
+		
+		if( not $dont_delete ) {
+		    my $do_delete = 0;
+		    # If we want to delete it, make sure expiration date is OK
+		    my $now = time;
+		    my $expiration = $self->{ 'clean_expiration' };
+		    if( $expiration ) {
+			if( $expiration < ( $now - $ftp->mdtm( $to_delete ) ) ) {
+			    $self->log_message( "Elapsed time: " . ( $now - $ftp->mdtm( $to_delete ) ) .
+						" vs. $expiration" );
+			    $do_delete = 1;
+			}
+		    }
+		    else {
 			$do_delete = 1;
 		    }
-		}
-		else {
-		    $do_delete = 1;
-		}
-
-		if( $do_delete ) {
-		    $self->log_message( "Deleting from remote site: $to_delete and MD5 hash" ); 
-		    $ftp->delete( $to_delete ); 
-		    $ftp->delete( $to_delete . ".md5" ); 
+		    
+		    if( $do_delete ) {
+			$self->log_message( "Deleting from remote site: $to_delete and MD5 hash" ); 
+			$ftp->delete( $to_delete ); 
+			$ftp->delete( $to_delete . ".md5" ); 
+		    }
 		}
 	    }
 	}
@@ -82,47 +84,127 @@ sub set_cleanup {
     $self->{ 'clean_expiration' } = $hash->{ 'expires' };
 }
 
-sub upload {
+sub ftp_upload
+{
     my $self = shift;
-    my $file = shift;
+    my $item = shift;
+    $self->log_message( "Inside ftp upload" );
+    my $file = ( $item->{ 'xml' } ? $item->{ 'xml' } : 
+		 ( -e $item->{ 'mp3' } ? $item->{ 'mp3' } : 
+		   ( $item->{ 'local_root' } . $item->{ 'mp3' } ) ) );
     my $short_name = $1 if $file =~ /\/([^\/]+)$/;
+
+    # Create ftp object if not there
+    use Net::FTP;
+    $self->{ 'ftp_handle' } = new Net::FTP( $self->{ 'host' } ) 
+	unless $self->{ 'ftp_handle' };
+    my $ftp = $self->{ 'ftp_handle' };
+    
+    if( $ftp ) {
+	# Disable these for now, since we often get without true error
+	# $self->log_message( "Unable to login with username: " . $self->{ 'username' } .
+	#", message: " . $ftp->message ) 
+	# unless 
+	$ftp->login( $self->{ 'username' }, $self->{ 'password' } );
+	# $self->log_message( "Unable to move to " . $self->{ 'path' } . 
+	# ", message: " . $ftp->message ) 
+	#unless 
+	$ftp->cwd( $self->{ 'path' } );
+	
+	$ftp->binary();
+	
+	my $size = -s $file;
+	$return_value = $self->upload_if_necessary( $ftp, $short_name, $file );
+	
+	# Disabled for now, sizes seem different regardless, bytes might be 
+	# incorrectly reported.
+	if( 0 && $self->{ 'remote_root' } ) {
+	    # Verify the file is there
+	    use LWP::Simple;
+	    my $full_path = $self->{ 'remote_root' } . $short_name;
+	    my @result = head( $full_path );
+	    $self->log_error( "Remote size ($result[1] vs $size) and local sizes are " .
+			      "different [$full_path]" )
+		unless $result[ 1 ] == $size;
+	}
+    }
+    return $return_value;
+}
+
+sub set_piab_uploaded {
+    
+}
+
+sub piab_upload {
+    my $self = shift;
+    my $item = shift;
     my $return_value = 0;
-
-    if( $self->{ 'protocol' } eq 'ftp' ) {
-	# Create ftp object if not there
-	use Net::FTP;
-	$self->{ 'ftp_handle' } = new Net::FTP( $self->{ 'host' } ) 
-	    unless $self->{ 'ftp_handle' };
-	my $ftp = $self->{ 'ftp_handle' };
-
-	if( $ftp ) {
-	    # Disable these for now, since we often get without true error
-	    # $self->log_message( "Unable to login with username: " . $self->{ 'username' } .
-	    #", message: " . $ftp->message ) 
-	    # unless 
-	    $ftp->login( $self->{ 'username' }, $self->{ 'password' } );
-	    # $self->log_message( "Unable to move to " . $self->{ 'path' } . 
-	    # ", message: " . $ftp->message ) 
-	    #unless 
-	    $ftp->cwd( $self->{ 'path' } );
-
-	    $ftp->binary();
-
-	    my $size = -s $file;
-	    $return_value = $self->upload_if_necessary( $ftp, $short_name, $file );
-
-	    # Disabled for now, sizes seem different regardless, bytes might be 
-	    # incorrectly reported.
-	    if( 0 && $self->{ 'remote_root' } ) {
-		# Verify the file is there
-		use LWP::Simple;
-		my $full_path = $self->{ 'remote_root' } . $short_name;
-		my @result = head( $full_path );
-		$self->log_error( "Remote size ($result[1] vs $size) and local sizes are " .
-				  "different [$full_path]" )
-		    unless $result[ 1 ] == $size;
+    $self->log_message( "Inside piab upload" );
+    # Don't upload any XML files
+    return if $item->{ 'xml' };
+    my $file = -e $item->{ 'mp3' } ? $item->{ 'mp3' } : 
+	( $item->{ 'local_root' } . $item->{ 'mp3' } );
+    # Don't upload if we've already done this.
+    return if $item->{ 'uploaded' };
+    # Get a temp file for the cookies
+    my $cookies = "/tmp/" . time() . ".piab-cookies.tmp";
+    eval {
+	# Login first
+	my $host = $self->{ 'host' };
+	my $login_url = "https://$host/user/login";
+	my $create_url = "https://$host/episode/create";
+	my @args = ( "curl", "-c", $cookies,
+		     "-k",  "-d",
+		     "user[login]=$self->{'username'}",
+		     "-d",
+		     "user[password]=$self->{'password'}",
+		     ( $login_url || "https://podasp.com/user/login" ) );
+	$self->log_message( "Commands for login: " . join " ", @args );
+	if( 0 == system( @args ) ) {
+	    $self->log_message( "Logged in" );
+	    # Get the metadata
+	    my $scrubbed_title = $item->{ 'title' };
+	    $scrubbed_title = "Upload from PIAB";
+	    my $scrubbed_description = $item->{ 'description' };
+	    $scrubbed_description = ( "Upload from PIAB, IP " . WIAB::Network::get_ip() . ", on " 
+				      . Class::Date::now ) unless $scrubbed_title;
+	    my $scrubbed_podcast = $item->{ 'associated_podcast' };
+	    @args = ( "curl", "-b", $cookies, "-c", $cookies,
+		      "-H", "Expect:",
+		      "-k",
+		      "-F", "episode[title]=$scrubbed_title",
+		      "-F", "episode[description]=$scrubbed_description",
+		      ( $scrubbed_podcast ? ( "-F", "episode[podcast]=$scrubbed_podcast" ) : () ),
+		      "-F", "episode_mp3_file=\@" . $file,
+		      $create_url
+		      );
+	    $self->log_message( "Commands for creation: " . join " ", @args );
+	    if( 0 == system( @args ) ) {
+		$self->log_message( "Created file [$item->{'mp3'}]" );
+		$return_value = 1;
+	    }
+	    else {
+		$self->log_error( "Unable to create file" );
 	    }
 	}
+	else {
+	    $self->log_message( "Unable to login: $!" );
+	}
+    };
+    # Make sure to delete this file.
+    unlink $cookies;
+    return $return_value;
+}
+
+sub upload {
+    my $self = shift;
+    my $item = shift;
+    my $return_value = 0;
+    if( $self->{ 'protocol' } eq 'ftp' ) {
+	$return_value = $self->ftp_upload( $item );
+    }
+    elsif( $self->{ 'protocol' } eq 'piab' ) {
+	$return_value = $self->piab_upload( $item );
     }
     return $return_value;
 }

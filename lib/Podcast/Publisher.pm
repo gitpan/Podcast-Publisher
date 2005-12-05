@@ -14,7 +14,7 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.37";
+$VERSION="0.40";
 
 =pod
 
@@ -108,6 +108,7 @@ sub new {
     my $class = shift;
     my $self = {};
     $self->{ 'maximum_episodes' } = 15;
+    $self->{ 'piab_upload_root' } = "/opt/wiab/text_data/piab_upload";
     bless ( $self, $class );
     return $self;
 }
@@ -129,7 +130,7 @@ then the upload is skipped.  Finally the podcast.xml file is uploaded.
 sub upload { 
     my $self = shift;
 
-    # $self->log_message( "Entering upload" );
+    $self->log_message( "Entering upload" );
     
     $self->log_error( "Must call set_upload_settings to establish upload settings first" )
 	unless $self->{ 'upload_handle' };
@@ -137,18 +138,18 @@ sub upload {
     # Upload all files
     my $items = $self->get_episodes();
     
+    $self->log_message( "Found episodes: " . scalar( @{$items} ) );
+
     # Create upload object
 
     foreach my $item ( @{$items} ) {
-	my $filename = -e $item->{ 'mp3' } ? $item->{ 'mp3' } : 
-	    ( $self->{ 'local_root' } . $item->{ 'mp3' } );
+	$item->{ 'local_root' } = $self->{ 'local_root' };
 	$self->log_error( "Cannot upload mp3: " . $item->{ 'mp3' } )
-	    unless $self->{ 'upload_handle' }->upload( $filename );
+	    unless $self->{ 'upload_handle' }->upload( $item );
     }
     
     # Uplaod the RSS file
-    $self->{ 'upload_handle' }->upload( $self->{ 'filename' } );
-
+    $self->{ 'upload_handle' }->upload( { 'xml' => $self->{ 'filename' } } );
     $self->{ 'upload_handle' }->clean( $items );
 }
 
@@ -789,6 +790,7 @@ sub write_episode_metadata {
     my $creator = $item->{ 'author' } || $item->{ 'artist' };
     my $album = $item->{ 'album' };
     my $description = $item->{ 'description' };
+    my $podcast = $item->{ 'associated_podcast' };
     my $category = $item->{ 'category' } || $item->{ 'genre' };
     my $link = $item->{ 'link' };
     chomp $date;
@@ -799,10 +801,11 @@ sub write_episode_metadata {
     $item->{ 'author' } = $author;
     $item->{ 'category' } = $category;
     $item->{ 'pubDate' } = $date;
+    $item->{ 'associated_podcast' } = $podcast;
     $item->{ 'description' } = $description;
     my $file = $item->{ 'mp3' };
 
-    $self->log_message( "Episode data: $title, $author, $category, $date, $description, $file" );
+    $self->log_message( "Episode data: $title, $author, $category, $date, $description, $file, $podcast" );
 
     if( $id ) {
 	my @potentials = ( 'title',
@@ -811,6 +814,7 @@ sub write_episode_metadata {
 			   'category',
 			   'pubDate',
 			   'description',
+			   'associated_podcast',
 			   'mp3' );
 	$sql = "update episodes set ";
 	my @code;
@@ -827,7 +831,7 @@ sub write_episode_metadata {
     }
     else {
 	$sql = "insert into episodes " .
-	    "       ( title, link, author, category, pubDate, description, mp3 ) " .
+	    "       ( title, link, author, category, pubDate, description, mp3, associated_podcast ) " .
 	    " values( ?,     ?,    ?,      ?,        ?,       ?,           ? )";
 	@values = ( $title,
 		    $link,
@@ -835,7 +839,8 @@ sub write_episode_metadata {
 		    $category,
 		    $date, 
 		    $description,
-		    $file );
+		    $file,
+		    $associated_podcast );
     }
 
     my $sth = $self->{ 'dbh' }->prepare( $sql );
