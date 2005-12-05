@@ -14,7 +14,7 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.41";
+$VERSION="0.42";
 
 =pod
 
@@ -130,7 +130,7 @@ then the upload is skipped.  Finally the podcast.xml file is uploaded.
 sub upload { 
     my $self = shift;
 
-    $self->log_message( "Entering upload" );
+    # $self->log_message( "Entering upload" );
     
     $self->log_error( "Must call set_upload_settings to establish upload settings first" )
 	unless $self->{ 'upload_handle' };
@@ -138,7 +138,7 @@ sub upload {
     # Upload all files
     my $items = $self->get_episodes();
     
-    $self->log_message( "Found episodes: " . scalar( @{$items} ) );
+    # $self->log_message( "Found episodes: " . scalar( @{$items} ) );
 
     # Create upload object
 
