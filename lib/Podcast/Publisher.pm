@@ -14,7 +14,7 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.40";
+$VERSION="0.41";
 
 =pod
 
@@ -146,6 +146,7 @@ sub upload {
 	$item->{ 'local_root' } = $self->{ 'local_root' };
 	$self->log_error( "Cannot upload mp3: " . $item->{ 'mp3' } )
 	    unless $self->{ 'upload_handle' }->upload( $item );
+	$self->set_uploaded_status( $item );
     }
     
     # Uplaod the RSS file
@@ -978,6 +979,19 @@ sub set_synchronize {
     $self->{ 'synchronize' } = shift;
 }
 
+sub set_uploaded_status {
+    my $self = shift;
+    my $item = shift;
+    eval {
+	# Store the flag in the database
+	my $sql = "update episodes set uploaded = '1' where id = ?";
+	my $sth = $self->{ 'dbh' }->prepare( $sql );
+	$sth->execute( $item->{ 'id' } );
+    };
+    if( $@ ) {
+	$self->error_message( "FATAL: Unable to set episodes uploaded status field" );
+    }
+}
 
 1;
 

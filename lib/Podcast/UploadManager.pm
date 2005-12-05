@@ -3,7 +3,7 @@ package Podcast::UploadManager;
 
 use Net::FTP;
 
-$VERSION="0.40";
+$VERSION="0.41";
 
 sub new { 
     my $class = shift;
@@ -131,21 +131,16 @@ sub ftp_upload
     return $return_value;
 }
 
-sub set_piab_uploaded {
-    
-}
-
 sub piab_upload {
     my $self = shift;
     my $item = shift;
     my $return_value = 0;
-    $self->log_message( "Inside piab upload" );
     # Don't upload any XML files
     return if $item->{ 'xml' };
     my $file = -e $item->{ 'mp3' } ? $item->{ 'mp3' } : 
 	( $item->{ 'local_root' } . $item->{ 'mp3' } );
     # Don't upload if we've already done this.
-    return if $item->{ 'uploaded' };
+    return 1 if $item->{ 'uploaded' };
     # Get a temp file for the cookies
     my $cookies = "/tmp/" . time() . ".piab-cookies.tmp";
     eval {
@@ -167,7 +162,7 @@ sub piab_upload {
 	    $scrubbed_title = "Upload from PIAB";
 	    my $scrubbed_description = $item->{ 'description' };
 	    $scrubbed_description = ( "Upload from PIAB, IP " . WIAB::Network::get_ip() . ", on " 
-				      . Class::Date::now ) unless $scrubbed_title;
+				      . Class::Date::now ) unless $scrubbed_description;
 	    my $scrubbed_podcast = $item->{ 'associated_podcast' };
 	    @args = ( "curl", "-b", $cookies, "-c", $cookies,
 		      "-H", "Expect:",
