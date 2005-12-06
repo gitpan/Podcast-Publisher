@@ -14,7 +14,7 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.42";
+$VERSION="0.43";
 
 =pod
 
@@ -833,7 +833,7 @@ sub write_episode_metadata {
     else {
 	$sql = "insert into episodes " .
 	    "       ( title, link, author, category, pubDate, description, mp3, associated_podcast ) " .
-	    " values( ?,     ?,    ?,      ?,        ?,       ?,           ? )";
+	    " values( ?,     ?,    ?,      ?,        ?,       ?,           ?,   ? )";
 	@values = ( $title,
 		    $link,
 		    $creator,
