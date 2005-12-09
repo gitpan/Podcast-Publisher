@@ -3,7 +3,7 @@ package Podcast::UploadManager;
 
 use Net::FTP;
 
-$VERSION="0.43";
+$VERSION="0.44";
 
 sub new { 
     my $class = shift;
@@ -159,7 +159,7 @@ sub piab_upload {
 	    $self->log_message( "Logged in" );
 	    # Get the metadata
 	    my $scrubbed_title = $item->{ 'title' };
-	    $scrubbed_title = "Upload from PIAB";
+	    $scrubbed_title = "Upload from PIAB" unless $scrubbed_title;
 	    my $scrubbed_description = $item->{ 'description' };
 	    $scrubbed_description = ( "Upload from PIAB, IP " . WIAB::Network::get_ip() . ", on " 
 				      . Class::Date::now ) unless $scrubbed_description;
