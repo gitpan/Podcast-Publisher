@@ -14,7 +14,7 @@ use Digest::MD5;
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 
-$VERSION="0.44";
+$VERSION="0.45";
 
 =pod
 
@@ -982,11 +982,23 @@ sub set_synchronize {
 sub set_uploaded_status {
     my $self = shift;
     my $item = shift;
+    my $value = shift;
+
+    # If item is not an episode, get it
+    if( 'HASH' ne ref $item ) {
+	$item =~ s/'/\\'/g;
+	my $sql = "select * from episodes where id = '$item'";
+	my $rh = $self->retrieve_items_by_statement( $sql );
+	my $items = $rh->{ 'items' } if( $rh and !$rh->{ 'error' } );
+	$item = $items->[ 0 ];
+    }
+
+    $value = 1 unless defined $value;
     eval {
 	# Store the flag in the database
-	my $sql = "update episodes set uploaded = '1' where id = ?";
+	my $sql = "update episodes set uploaded = ? where id = ?";
 	my $sth = $self->{ 'dbh' }->prepare( $sql );
-	$sth->execute( $item->{ 'id' } );
+	$sth->execute( $value, $item->{ 'id' } );
     };
     if( $@ ) {
 	$self->error_message( "FATAL: Unable to set episodes uploaded status field" );
