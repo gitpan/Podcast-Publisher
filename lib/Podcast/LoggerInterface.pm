@@ -1,7 +1,7 @@
 package Podcast::LoggerInterface;
 use Carp;
 
-$VERSION="0.45";
+$VERSION="0.50";
 
 sub set_logger { 
     my $self = shift;

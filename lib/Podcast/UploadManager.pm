@@ -3,7 +3,7 @@ package Podcast::UploadManager;
 
 use Net::FTP;
 
-$VERSION="0.45";
+$VERSION="0.50";
 
 sub new { 
     my $class = shift;
@@ -84,6 +84,13 @@ sub set_cleanup {
     $self->{ 'clean_expiration' } = $hash->{ 'expires' };
 }
 
+sub get_upload_pref {
+    my $self = shift;
+    my $key = shift;
+    my $rv = $self->{ 'alt_upload' } ? $self->{ 'alt_upload' }->{ $key } : $self->{ $key };
+    return $rv;
+}
+
 sub ftp_upload
 {
     my $self = shift;
@@ -96,7 +103,7 @@ sub ftp_upload
 
     # Create ftp object if not there
     use Net::FTP;
-    $self->{ 'ftp_handle' } = new Net::FTP( $self->{ 'host' } ) 
+    $self->{ 'ftp_handle' } = new Net::FTP( $self->get_upload_pref( 'host' ) ) 
 	unless $self->{ 'ftp_handle' };
     my $ftp = $self->{ 'ftp_handle' };
     
@@ -105,11 +112,11 @@ sub ftp_upload
 	# $self->log_message( "Unable to login with username: " . $self->{ 'username' } .
 	#", message: " . $ftp->message ) 
 	# unless 
-	$ftp->login( $self->{ 'username' }, $self->{ 'password' } );
+	$ftp->login( $self->get_upload_pref( 'username' ), $self->get_upload_pref( 'password' ) );
 	# $self->log_message( "Unable to move to " . $self->{ 'path' } . 
 	# ", message: " . $ftp->message ) 
 	#unless 
-	$ftp->cwd( $self->{ 'path' } );
+	$ftp->cwd( $self->get_upload_pref( 'path' ) );
 	
 	$ftp->binary();
 	
@@ -118,10 +125,10 @@ sub ftp_upload
 	
 	# Disabled for now, sizes seem different regardless, bytes might be 
 	# incorrectly reported.
-	if( 0 && $self->{ 'remote_root' } ) {
+	if( 0 && $self->get_upload_pref( 'remote_root' ) ) {
 	    # Verify the file is there
 	    use LWP::Simple;
-	    my $full_path = $self->{ 'remote_root' } . $short_name;
+	    my $full_path = $self->get_upload_pref( 'remote_root' ) . $short_name;
 	    my @result = head( $full_path );
 	    $self->log_error( "Remote size ($result[1] vs $size) and local sizes are " .
 			      "different [$full_path]" )
@@ -131,10 +138,25 @@ sub ftp_upload
     return $return_value;
 }
 
+sub check_success {
+    my $self = shift;
+    my $out = shift;
+    my $success = 0;
+    if( open OUTPUT, $out ) {
+	undef $/;
+	my $file = <OUTPUT>;
+	$success = $file !~ /unsuccessful/i;
+	$self->log_message( "Logged in successfully" ) if $success;
+    }
+    return $success;
+}
+
+
 sub piab_upload {
     my $self = shift;
     my $item = shift;
     my $return_value = 0;
+    print "Inside piab upload".
     # Don't upload any XML files
     return if $item->{ 'xml' };
     my $file = -e $item->{ 'mp3' } ? $item->{ 'mp3' } : 
@@ -143,30 +165,40 @@ sub piab_upload {
     return 1 if $item->{ 'uploaded' };
     # Get a temp file for the cookies
     my $cookies = "/tmp/" . time() . ".piab-cookies.tmp";
+    my $out = "/tmp/" . time() . ".out.tmp";
+
     eval {
-	# Login first
-	my $host = $self->{ 'host' };
+	my $host = $self->get_upload_pref( "host" );
+	my $username = $self->get_upload_pref( "username" );
+	my $password = $self->get_upload_pref( "password" );
 	my $login_url = "https://$host/user/login";
 	my $create_url = "https://$host/episode/create";
+	# Login first
 	my @args = ( "curl", "-c", $cookies,
-		     "-k",  "-d",
-		     "user[login]=$self->{'username'}",
+		     "-k",  "-d", 
+		     "user[login]=$username",
 		     "-d",
-		     "user[password]=$self->{'password'}",
-		     ( $login_url || "https://podasp.com/user/login" ) );
-	$self->log_message( "Commands for login: " . join " ", @args );
-	if( 0 == system( @args ) ) {
+		     "user[password]=$password",
+		     ( $login_url || "https://podasp.com/user/login" ),
+		     "-o", $out );
+	my $cmd_str = join " ", @args;
+	$cmd_str =~ s/user\[login\]=\S+/user\[login\]=xxxx/;
+	$cmd_str =~ s/user\[password\]=\S+/user\[password\]=xxxx/;
+	$self->log_message( "Commands for login: " . $cmd_str );
+	# Check to see if the out file indicates success or failure
+
+	if( 0 == system( @args ) and check_success( $self, $out ) ) {
 	    $self->log_message( "Logged in" );
 	    # Get the metadata
 	    my $scrubbed_title = $item->{ 'title' };
 	    $scrubbed_title = "Upload from PIAB" unless $scrubbed_title;
 	    my $scrubbed_description = $item->{ 'description' };
 	    $scrubbed_description = ( "Upload from PIAB, IP " . WIAB::Network::get_ip() . ", on " 
-				      . Class::Date::now ) unless $scrubbed_description;
+				      . Class::Date::now() ) unless $scrubbed_description;
 	    my $scrubbed_podcast = $item->{ 'associated_podcast' };
 	    @args = ( "curl", "-b", $cookies, "-c", $cookies,
 		      "-H", "Expect:",
-		      "-k",
+		      "-k", "-o", '/dev/null',
 		      "-F", "episode[title]=$scrubbed_title",
 		      "-F", "episode[description]=$scrubbed_description",
 		      ( $scrubbed_podcast ? ( "-F", "episode[podcast]=$scrubbed_podcast" ) : () ),
@@ -186,20 +218,27 @@ sub piab_upload {
 	    $self->log_message( "Unable to login: $!" );
 	}
     };
-    # Make sure to delete this file.
+
+    # Make sure to delete these files.
     unlink $cookies;
+    unlink $out;
     return $return_value;
 }
 
 sub upload {
     my $self = shift;
     my $item = shift;
+    $self->{ 'alt_upload' } = shift;
     my $return_value = 0;
-    if( $self->{ 'protocol' } eq 'ftp' ) {
+    my $protocol = $self->get_upload_pref( 'protocol' );
+    if( $protocol eq 'ftp' ) {
 	$return_value = $self->ftp_upload( $item );
     }
-    elsif( $self->{ 'protocol' } eq 'piab' ) {
+    elsif( $protocol eq 'piab' ) {
 	$return_value = $self->piab_upload( $item );
+    }
+    elsif( $protocol eq 'off' ) {
+	$return_value = 1;
     }
     return $return_value;
 }

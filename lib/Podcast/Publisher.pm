@@ -13,8 +13,9 @@ use Digest::MD5;
 
 my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
+my $_upload_info;
 
-$VERSION="0.45";
+$VERSION="0.50";
 
 =pod
 
@@ -143,10 +144,14 @@ sub upload {
     # Create upload object
 
     foreach my $item ( @{$items} ) {
+	my $ui = $_upload_info[ $item->{ 'id' } ];
 	$item->{ 'local_root' } = $self->{ 'local_root' };
-	$self->log_error( "Cannot upload mp3: " . $item->{ 'mp3' } )
-	    unless $self->{ 'upload_handle' }->upload( $item );
-	$self->set_uploaded_status( $item );
+	if( $self->{ 'upload_handle' }->upload( $item, $ui ) ) {
+	    $self->set_uploaded_status( $item );
+	}
+	else {
+	    $self->log_error( "Cannot upload mp3: " . $item->{ 'mp3' } );
+	}
     }
     
     # Uplaod the RSS file
@@ -383,6 +388,28 @@ sub get_episodes {
     my $rh = $self->retrieve_items_by_statement( $sql );
     my $items = $rh->{ 'items' } if( $rh and !$rh->{ 'error' } );
     return $items;
+}
+
+
+=item set_episode_upload_metadata()
+
+$podcast->set_episode_upload_metadata( index, metadata );
+
+This sets the first episode to upload to podcasthosting.com with username/password "username" and "password" 
+and put the files into "mypodcast/directory/path"
+
+$podcast->set_episode_upload_metadata( 0, { 'protocol' => 'ftp', 'host' => 'podcasthosting.com', 
+					    'username' => 'username', 'password' => 'password',
+					    'path' => 'mypodcast/directory/path' } );
+
+=cut
+
+sub set_episode_upload_metadata { 
+    my $self = shift;
+    my $index = shift;
+    my $info = shift;
+    $_upload_info = [] unless $_upload_info;
+    $_upload_info[ $index ] = $info;
 }
 
 =item delete_episode()
@@ -844,8 +871,10 @@ sub write_episode_metadata {
 		    $associated_podcast );
     }
 
+    $self->log_message( "SQL: $sql, Values: @values" );
     my $sth = $self->{ 'dbh' }->prepare( $sql );
     $sth->execute( @values );
+    $self->log_message( "Error: " . $sth->errstr );
     $file = $self->get_file( $id ) unless $file; 
     my $full_file = -e $file ? $file : ( $self->{ 'local_root' } . $file );  
 	
