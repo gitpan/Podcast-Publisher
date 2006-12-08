@@ -3,7 +3,7 @@ package Podcast::UploadManager;
 
 use Net::FTP;
 
-$VERSION="0.50";
+$VERSION="0.51";
 
 sub new { 
     my $class = shift;
@@ -95,7 +95,7 @@ sub ftp_upload
 {
     my $self = shift;
     my $item = shift;
-    $self->log_message( "Inside ftp upload" );
+    # $self->log_message( "Inside ftp upload" );
     my $file = ( $item->{ 'xml' } ? $item->{ 'xml' } : 
 		 ( -e $item->{ 'mp3' } ? $item->{ 'mp3' } : 
 		   ( $item->{ 'local_root' } . $item->{ 'mp3' } ) ) );
@@ -156,7 +156,7 @@ sub piab_upload {
     my $self = shift;
     my $item = shift;
     my $return_value = 0;
-    print "Inside piab upload".
+    # print "Inside piab upload".
     # Don't upload any XML files
     return if $item->{ 'xml' };
     my $file = -e $item->{ 'mp3' } ? $item->{ 'mp3' } : 
@@ -175,7 +175,7 @@ sub piab_upload {
 	my $create_url = "https://$host/episode/create";
 	# Login first
 	my @args = ( "curl", "-c", $cookies,
-		     "-k",  "-d", 
+		     "-k", "-s", "-d", 
 		     "user[login]=$username",
 		     "-d",
 		     "user[password]=$password",
@@ -198,7 +198,7 @@ sub piab_upload {
 	    my $scrubbed_podcast = $item->{ 'associated_podcast' };
 	    @args = ( "curl", "-b", $cookies, "-c", $cookies,
 		      "-H", "Expect:",
-		      "-k", "-o", '/dev/null',
+		      "-k", "-s", "-o", '/dev/null',
 		      "-F", "episode[title]=$scrubbed_title",
 		      "-F", "episode[description]=$scrubbed_description",
 		      ( $scrubbed_podcast ? ( "-F", "episode[podcast]=$scrubbed_podcast" ) : () ),

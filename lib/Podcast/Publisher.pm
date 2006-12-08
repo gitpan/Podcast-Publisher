@@ -15,7 +15,7 @@ my $DEFAULT_CONF = '.piab/podcastcfg.xml';
 my $DEFAULT_DB_CONF = '.piab/dbcfg.xml';
 my $_upload_info;
 
-$VERSION="0.50";
+$VERSION="0.51";
 
 =pod
 
